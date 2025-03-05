@@ -1,4 +1,3 @@
-#include "usfhashmap.h"
 #include "usfio.h"
 #include "usfstring.h"
 #include <time.h>
@@ -6,14 +5,11 @@
 
 #define WILDCARD '*'
 
-/* Threshold is exclusive */
-#define INTEGRITY_VERIFICATION_THRESHOLD 6
-
 _Atomic uint64_t solutions;
 uint64_t formatlen;
-int **format, ***query, declen;
+int **format, **query[256], declen;
 char **words;
-usf_dynarr **wtree;
+usf_dynarr *wtree[256];
 FILE *outstream;
 
 void start(char *);
@@ -37,7 +33,6 @@ int main(int args, char *argv[]) {
 	fprintf(stderr, "IMPORTANT: wordlists and formats must only contain ASCII a-z chars, except for the declaration which is only limited to ASCII characters.\n");
 
 	/* Initialization */
-	wtree = calloc(sizeof(usf_dynarr **), 256);
 
 	/* Read format file */
 	rawformat = usf_ftot(argv[1], "r", &rawlen);
@@ -127,8 +122,6 @@ int main(int args, char *argv[]) {
 	/* Convert affected slot -> array of words to be fitted
 	 * Array of pointers is terminated by 0 (NULL pointer)
 	 * Words end with -1 as per format */
-
-	query = malloc(sizeof(int **) * declen);
 
 	for (i = n = 0; i < (unsigned) declen; i++) {
 		/* Overallocating; no impact on performance */
@@ -272,7 +265,7 @@ int main(int args, char *argv[]) {
 
 	clock_gettime(CLOCK_REALTIME, &end);
 
-	printf("Finished after %f seconds, found %lu solutions.\n", (double) (end.tv_sec - begin.tv_sec) + (double) (end.tv_nsec - begin.tv_nsec) / 1000000000.0, solutions);
+	fprintf(stderr, "Finished after %f seconds, found %lu solutions.\n", (double) (end.tv_sec - begin.tv_sec) + (double) (end.tv_nsec - begin.tv_nsec) / 1000000000.0, solutions);
 
 	/* Cleanup */
 
@@ -284,7 +277,6 @@ int main(int args, char *argv[]) {
 	/* Destroy query */
 	for (i = 0; i < (unsigned) declen; i++)
 		free(query[i]);
-	free(query);
 
 	/* Destroy word list */
 	for (i = 0; i < wordlen; i++)
@@ -373,9 +365,8 @@ void fit(int step, char *board) {
 			/* Place one character */
 			board[*i] = attempt[e];
 
-			continue;
-			/* Verify integrity if we're beyond threshold (no need if last step) */
-			if (step <= INTEGRITY_VERIFICATION_THRESHOLD || (unsigned) step == formatlen - 1)
+			/* Don't bother with the last one */
+			if ((unsigned) step == formatlen - 1)
 				continue;
 
 			/* For every overlapping instruction (format) */
