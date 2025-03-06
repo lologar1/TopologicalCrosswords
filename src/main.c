@@ -2,6 +2,7 @@
 #include "usfstring.h"
 #include <time.h>
 #include <omp.h>
+#include <limits.h>
 
 #define WILDCARD '*'
 
@@ -13,7 +14,7 @@ usf_dynarr *wtree[256];
 FILE *outstream;
 
 void start(char *);
-void fit(int, char *);
+void fit(char *, char *);
 
 int main(int args, char *argv[]) {
 	uint64_t i, j, n, k;
@@ -109,16 +110,6 @@ int main(int args, char *argv[]) {
 		format[i][j] = -1;
 	}
 
-	/* DEBUG
-	for (i = 0; i < formatlen; i++) {
-		printf("For format %lu: ", i);
-
-		for (j = 0; j < strlen(rawformat[i + 1]); j++) {
-			printf("%d ", format[i][j]);
-		}
-		printf("\n");
-	} */
-
 	/* Convert affected slot -> array of words to be fitted
 	 * Array of pointers is terminated by 0 (NULL pointer)
 	 * Words end with -1 as per format */
@@ -139,17 +130,6 @@ int main(int args, char *argv[]) {
 		query[i][n] = NULL;
 		n = 0;
 	}
-
-	/* DEBUG
-	for (i = 0; i < strlen(declaration); i++) {
-		printf("For char %c\n", declaration[i]);
-
-		for (j = 0; query[i][j]; j++) {
-			for (n = 0; query[i][j][n] != -1; n++)
-				printf("%d ", query[i][j][n]);
-			printf("\n");
-		}
-	} */
 
 	printf("Done !\n");
 
@@ -206,32 +186,6 @@ int main(int args, char *argv[]) {
 	}
 
 	free(instruction);
-
-	/* DEBUG
-	//Let's seach everything starting with air, 5 long !
-	declaration = "air*";
-	treenode = wtree;
-
-	for (i = 0; i < strlen(declaration); i++) {
-		if (treenode == NULL) {
-			fprintf(stderr, "No such words\n");
-			exit(1);
-		}
-
-		treenode = (usf_dynarr **) treenode[declaration[i]];
-	}
-
-	matches = treenode[0];
-	if (matches == NULL) {
-		fprintf(stderr, "No words like this\n");
-		exit(1);
-	}
-
-	fprintf(stderr, "%lu words\n", matches -> size);
-
-	for (i = 0; i < matches -> size; i++) {
-		fprintf(stderr, "%s\n", matches -> array[i]);
-	} */
 
 	printf("Done !\n");
 
@@ -296,32 +250,88 @@ int main(int args, char *argv[]) {
 
 void start(char *baseword) {
 	int i, *instruction;
-	char *board;
+	char *board, *steps;
 
 	/* Allocate board +1 for printable \n char */
 	board = malloc(sizeof(char) * (declen + 1));
+	steps = calloc(sizeof(int), formatlen);
 
 	/* Fill with wildcards */
 	for (i = 0; i < declen; i++)
 		board[i] = WILDCARD;
 	board[i] = '\n';
 
+	/* Enter root word */
 	for (i = 0, instruction = format[0]; *instruction != -1; i++, instruction++)
 		board[*instruction] = baseword[i];
+	steps[0] = 1;
 
 	/* Start digging */
-	fit(1, board);
+	fit(steps, board);
 
 	/* Cleanup */
 	free(board);
+	free(steps);
 }
 
-void fit(int step, char *board) {
-	int modified[256], *form, *i, n, e;
+void fit(char *steps, char *board) {
+	int modified[256], *form, *i, n, e, step;
 	int **answer, *instruction;
 	char **nominees, *attempt;
 	unsigned char current;
 	usf_dynarr *branches, **treenode;
+
+	/* By default if none is found */
+	step = -1;
+
+	/* Best size so far */
+	e = INT_MAX;
+
+	/* Test if we are done */
+	current = 1;
+
+	/* Determine optimal step to undertake */
+	for (n = 0; (unsigned) n < formatlen; n++) {
+		/* Already undertook */
+		if (steps[n]) continue;
+
+		/* Did not finish */
+		current = 0;
+
+		/* Get instruction */
+		form = format[n];
+
+		/* Traverse trie */
+		treenode = wtree;
+
+		for (i = form; *i != -1; i++) {
+			if ((treenode = (usf_dynarr **) treenode[(unsigned char) board[*i]]) == NULL)
+				goto deadend; /* Cul de sac */
+		}
+
+		branches = treenode[0];
+		if (branches == NULL) continue;
+
+		if (branches -> size <= (unsigned) e) {
+			e = branches -> size;
+			step = n;
+		}
+deadend:
+		continue;
+	}
+
+	/* Win condition */
+	if (current) {
+		fwrite(board, sizeof(char), declen + 1, outstream);
+		solutions++;
+		return;
+	}
+
+	/* No possibilities here */
+	if (step == -1) return;
+
+	/* Mark */
+	steps[step] = 1;
 
 	/* Instruction for this step */
 	form = format[step];
@@ -329,7 +339,7 @@ void fit(int step, char *board) {
 	/* Keep track of modified characters */
 	e = 0;
 
-	/* Traverse trie */
+	/* Keep track of modified cells */
 	treenode = wtree;
 
 	for (i = form; *i != -1; i++) {
@@ -342,16 +352,13 @@ void fit(int step, char *board) {
 			/* Will have to be reset later */
 			modified[e++] = n;
 
-		/* Cul-de-sac */
-		if ((treenode = (usf_dynarr **) treenode[current]) == NULL) return;
+		treenode = (usf_dynarr **) treenode[current];
 	}
 
 	/* Terminating -1 to stop resetting */
 	modified[e] = -1;
 
-	/* All valid branches */
-	if ((branches = (usf_dynarr *) treenode[0]) == NULL)
-		return; /* Also cul-de-sac */
+	branches = (usf_dynarr *) treenode[0];
 
 	/* All possible next words */
 	nominees = (char **) branches -> array;
@@ -371,6 +378,9 @@ void fit(int step, char *board) {
 
 			/* For every overlapping instruction (format) */
 			for (answer = query[*i]; *answer; answer++) {
+				/* Don't try this one */
+				if (*answer == form) continue;
+
 				/* Prepare to traverse trie */
 				treenode = wtree;
 
@@ -384,17 +394,14 @@ void fit(int step, char *board) {
 			}
 		}
 
-		/* Valid solution */
-		if ((unsigned) step == formatlen - 1) {
-			/* Include \n char to print board */
-			fwrite(board, sizeof(char), declen + 1, outstream);
-			solutions++;
-		} else {/* Recurse one branch down */
-			fit(step + 1, board);
-		}
+		fit(steps, board);
+
 cull:
 		/* Reset to avoid integrity malfunction */
 		for (i = modified; *i != -1; i++)
 			board[*i] = WILDCARD;
 	}
+
+	/* Unmark */
+	steps[step] = 0;
 }
