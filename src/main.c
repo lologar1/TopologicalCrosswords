@@ -1,5 +1,6 @@
 #include "usfio.h"
 #include "usfstring.h"
+#include "usfdynarr.h"
 #include <time.h>
 #include <omp.h>
 #include <limits.h>
@@ -36,13 +37,13 @@ int main(int args, char *argv[]) {
 	/* Initialization */
 
 	/* Read format file */
-	rawformat = usf_ftot(argv[1], "r", &rawlen);
+	rawformat = usf_ftot(argv[1], &rawlen);
 
 	/* Len of format without declaration */
 	formatlen = rawlen - 1;
 
 	/* Read wordlist */
-	words = usf_ftot(argv[2], "r", &wordlen);
+	words = usf_ftot(argv[2], &wordlen);
 
 	/* Output stream is stdout if not specified */
 	outstream = args > 3 ? fopen(argv[3], "w") : stdout;
@@ -65,17 +66,6 @@ int main(int args, char *argv[]) {
 	}
 
 	printf("Constructing format... ");
-
-	/* Remove all \n endings from word list and format */
-	for (i = 0; i < wordlen; i++) {
-		declaration = words[i];
-		declaration[strlen(declaration) - 1] = '\0';
-	}
-
-	for (i = 0; i < rawlen; i++) {
-		declaration = rawformat[i];
-		declaration[strlen(declaration) - 1] = '\0';
-	}
 
 	/* First line declares all chars to be used */
 	declaration = rawformat[0];
